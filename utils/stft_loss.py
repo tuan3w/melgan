@@ -6,6 +6,7 @@
 """STFT-based Loss modules."""
 
 import torch
+import math
 import torch.nn.functional as F
 
 
@@ -24,8 +25,11 @@ def stft(x, fft_size, hop_size, win_length, window):
     real = x_stft[..., 0]
     imag = x_stft[..., 1]
 
+    phase = torch.atan2(real, imag)
+    phase[phase < 0] += math.pi * 2
+
     # NOTE(kan-bayashi): clamp is needed to avoid nan or inf
-    return torch.sqrt(torch.clamp(real ** 2 + imag ** 2, min=1e-7)).transpose(2, 1)
+    return torch.sqrt(torch.clamp(real ** 2 + imag ** 2, min=1e-7)).transpose(2, 1), phase
 
 
 class SpectralConvergengeLoss(torch.nn.Module):
@@ -86,12 +90,25 @@ class STFTLoss(torch.nn.Module):
             Tensor: Spectral convergence loss value.
             Tensor: Log STFT magnitude loss value.
         """
-        x_mag = stft(x, self.fft_size, self.shift_size, self.win_length, self.window)
-        y_mag = stft(y, self.fft_size, self.shift_size, self.win_length, self.window)
+        x_mag, x_phase = stft(x, self.fft_size, self.shift_size, self.win_length, self.window)
+        y_mag, y_phase = stft(y, self.fft_size, self.shift_size, self.win_length, self.window)
         sc_loss = self.spectral_convergenge_loss(x_mag, y_mag)
         mag_loss = self.log_stft_magnitude_loss(x_mag, y_mag)
 
-        return sc_loss, mag_loss
+        x_phase_diff = x_phase[:,1:] - x_phase[:,:-1]
+        y_phase_diff = y_phase[:,1:] - y_phase[:,:-1]
+        x_phase_diff[x_phase_diff < 0] += math.pi * 2
+        y_phase_diff[y_phase_diff < 0] += math.pi * 2
+
+        # phase diff will have range from 0 to 2
+        phase_diff = 1- torch.cos(y_phase_diff - x_phase_diff)
+        phase_loss = torch.mean(torch.log(torch.clamp(phase_diff, min=1e-7)))
+
+
+        # calculate phase losss
+        
+
+        return sc_loss, mag_loss, phase_loss
 
 
 class MultiResolutionSTFTLoss(torch.nn.Module):
@@ -126,11 +143,13 @@ class MultiResolutionSTFTLoss(torch.nn.Module):
         """
         sc_loss = 0.0
         mag_loss = 0.0
+        phase_loss = 0
         for f in self.stft_losses:
-            sc_l, mag_l = f(x, y)
+            sc_l, mag_l, phase_l = f(x, y)
             sc_loss += sc_l
             mag_loss += mag_l
+            phase_loss += phase_l
         sc_loss /= len(self.stft_losses)
         mag_loss /= len(self.stft_losses)
 
-        return sc_loss, mag_loss
+        return sc_loss, mag_loss, phase_loss

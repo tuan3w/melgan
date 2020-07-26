@@ -16,32 +16,19 @@ class MyWriter(SummaryWriter):
                             mel_fmax=hp.audio.mel_fmax)
         self.is_first = True
 
-    def log_training(self, g_loss, d_loss, adv_loss, step):
-        self.add_scalar('train.g_loss', g_loss, step)
-        self.add_scalar('train.d_loss', d_loss, step)
-        self.add_scalar('train.adv_loss', adv_loss, step)
+    def log_training(self, loss, sc_loss, mag_loss, phase_loss, step):
+        self.add_scalar('train.loss', loss, step)
+        self.add_scalar('train.sc_loss', sc_loss, step)
+        self.add_scalar('train.mag_loss', mag_loss, step)
+        self.add_scalar('train.phase_loss', phase_loss, step)
 
-    def log_validation(self, g_loss, d_loss, adv_loss, generator, discriminator, target, prediction, step):
-        self.add_scalar('validation.g_loss', g_loss, step)
-        self.add_scalar('validation.d_loss', d_loss, step)
-        self.add_scalar('validation.adv_loss', adv_loss, step)
-        self.add_audio('raw_audio_predicted', prediction, step, self.sample_rate)
-        self.add_image('waveform_predicted', plot_waveform_to_numpy(prediction), step)
-        wav = torch.from_numpy(prediction).unsqueeze(0)
+    def log_audio(self, predict, target , step):
+        self.add_audio('predicted_audio', predict, step, self.sample_rate)
+        self.add_audio('target_audio', target, step, self.sample_rate)
+        wav = torch.from_numpy(predict).unsqueeze(0)
         mel = self.stft.mel_spectrogram(wav)  # mel [1, num_mel, T]
         self.add_image('melspectrogram_prediction', plot_spectrogram_to_numpy(mel.squeeze(0).data.cpu().numpy()),
                        step, dataformats='HWC')
-        self.log_histogram(generator, step)
-        self.log_histogram(discriminator, step)
-
-        if self.is_first:
-            self.add_audio('raw_audio_target', target, step, self.sample_rate)
-            self.add_image('waveform_target', plot_waveform_to_numpy(target), step)
-            wav = torch.from_numpy(target).unsqueeze(0)
-            mel = self.stft.mel_spectrogram(wav)  # mel [1, num_mel, T]
-            self.add_image('melspectrogram_target', plot_spectrogram_to_numpy(mel.squeeze(0).data.cpu().numpy()),
-                           step, dataformats='HWC')
-            self.is_first = False
 
     def log_histogram(self, model, step):
         for tag, value in model.named_parameters():
